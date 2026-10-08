@@ -1,0 +1,32 @@
+name: Windows validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install pinned development dependencies
+        run: ./tools/Initialize-DevEnvironment.ps1
+      - name: Validate catalog, both PowerShell engines, and Core lint
+        run: ./tools/Test-Project.ps1
+      - name: Build local package after validation
+        run: ./tools/Build-Package.ps1 -SkipChecks
+      - uses: actions/upload-artifact@v7
+        with:
+          name: WTConfigurator-local-package-not-public-release-ready
+          path: dist/WTConfigurator-*.zip
+          if-no-files-found: error

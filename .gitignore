@@ -1,0 +1,7 @@
+.dev/
+dist/
+TestResults.xml
+coverage.xml
+*.bak
+*.tmp
+*.recovery
