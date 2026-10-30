@@ -225,3 +225,21 @@ ANSI labels. A fetch, extraction, coverage, hash, or validation failure leaves
 the canonical snapshot and runtime catalog intact. Refresh requires a network;
 bundled theme use remains offline; the public source is opt-in. Code is MIT-licensed; catalog data and stored
 HTML/SVG documents have separate rights. Read [CATALOG-NOTICES.md](CATALOG-NOTICES.md).
+
+## Source downloads
+
+GitHub source ZIP/tarball downloads exclude the legacy runtime palette file
+and the snapshot containing captured HTML/SVG. Both remain in Git checkouts
+and history; archive exclusion does not establish redistribution rights.
+The source archive retains the module, wrapper, license, documentation and tools.
+Import its module and specify `-Source PublicCatalog` when selecting a theme:
+
+```powershell
+Import-Module .\WTConfigurator\WTConfigurator.psd1
+Get-WindowsTerminalTheme -Source PublicCatalog -Search 'Spaceduck'
+```
+
+Use the built `WTConfigurator-1.1.0-public-api.zip` for installation with the
+public source selected by default. Legacy catalog rebuild/full project checks
+require a Git checkout because source downloads intentionally omit their inputs.
+See RELEASE.md for verification of actual GitHub archives and release limits.

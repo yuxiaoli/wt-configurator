@@ -140,3 +140,28 @@ Package import, opacity transactions and restoration are checked offline by the
 builder. Run the public acceptance script for actual API theme application.
 This variant avoids redistributing withheld palettes; it does not override the
 existing source-archive rights or manual visual-release requirements.
+
+## Source archive exclusion
+
+`.gitattributes` applies `export-ignore` to exactly
+`WTConfigurator/data/themes.json` and `data/terminal-themes.json`. The latter
+contains the captured HTML/SVG documents. Git retains both files and their history.
+GitHub documents that [source downloads use git archive](https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives);
+[Git documents export-ignore](https://git-scm.com/docs/git-archive#ATTRIBUTES).
+These archive attributes are separate from `Build-Package -PublicCatalogOnly`.
+
+CI creates a source ZIP from its exact commit and runs `tools/Test-SourceArchive.ps1`.
+The check requires every other tracked file, including code, license and notices,
+and compares every archived file against its Git blob. Before tagging a release,
+also download the actual GitHub ZIP and tarball for the final commit. Check the ZIP
+with `tools/Test-SourceArchive.ps1 -Commit <sha> -ArchivePath <downloaded.zip>`
+and verify the tarball has the same paths and contents. Retain both inventories
+and hashes; local packaging success is not evidence of GitHub's output.
+
+Archive source use requires explicit `-Source PublicCatalog`; installable API-only
+packages already select it by default. Exclusion applies to archives of commits
+containing these attributes; old commits/tags and Git checkouts are unchanged.
+This does not clear legacy rights, authorize publishing, or substitute for the
+Windows 10/11 visual checks. A narrower API-only prerelease with outstanding
+visual/platform checks requires an explicit owner decision and must state the
+limits. Do not use `-ReleaseReady` or assert full release readiness for that build.

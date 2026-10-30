@@ -1,2 +1,6 @@
 # Keep generated JSON byte-identical on Windows checkouts.
 * text=auto eol=lf
+
+# Keep legacy palettes and captured HTML/SVG in Git, out of source downloads.
+/WTConfigurator/data/themes.json export-ignore
+/data/terminal-themes.json export-ignore
