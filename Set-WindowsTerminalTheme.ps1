@@ -8,20 +8,24 @@ param(
     [Alias('Profile')][string] $TargetProfile,
     [string] $SettingsPath,
     [switch] $List,
+    [ValidateSet('Bundled','PublicCatalog')][string] $Source,
+    [string] $CachePath,
+    [switch] $Offline,
     [switch] $NoBackup
 )
 
 $ErrorActionPreference = 'Stop'
 try {
     Import-Module (Join-Path $PSScriptRoot 'WTConfigurator/WTConfigurator.psd1') -ErrorAction Stop
+    $catalogOptions = @{ CachePath = $CachePath; Offline = $Offline }; if ($PSBoundParameters.ContainsKey('Source')) { $catalogOptions.Source = $Source }
     $hasAppearance = $PSBoundParameters.ContainsKey('Theme') -or $PSBoundParameters.ContainsKey('Opacity') -or $PSBoundParameters.ContainsKey('UseAcrylic')
     if ($List) {
         if ($hasAppearance) { throw '-List cannot be combined with theme, opacity, or acrylic changes.' }
-        Get-WindowsTerminalTheme | Format-Table Id, DisplayName, Mode -AutoSize
+        Get-WindowsTerminalTheme @catalogOptions | Format-Table Id, DisplayName, Mode, Compatibility -AutoSize
         exit 0
     }
     $arguments = @{}
-    foreach ($key in @('Theme', 'Opacity', 'UseAcrylic', 'TargetProfile', 'SettingsPath', 'NoBackup', 'WhatIf', 'Confirm', 'Verbose', 'Debug')) {
+    foreach ($key in @('Theme', 'Opacity', 'UseAcrylic', 'TargetProfile', 'SettingsPath', 'NoBackup', 'Source', 'CachePath', 'Offline', 'WhatIf', 'Confirm', 'Verbose', 'Debug')) {
         if ($PSBoundParameters.ContainsKey($key)) { $arguments[$key] = $PSBoundParameters[$key] }
     }
     if (-not $hasAppearance) {
@@ -29,9 +33,9 @@ try {
         while ($true) {
             $query = Read-Host 'Theme search (q to cancel)'
             if ($query -ieq 'q') { Write-Host 'Cancelled; no settings changed.'; exit 0 }
-            if ($query -eq '?') { Get-WindowsTerminalTheme | Format-Table Id, DisplayName, Mode -AutoSize; continue }
+            if ($query -eq '?') { Get-WindowsTerminalTheme @catalogOptions | Format-Table Id, DisplayName, Mode, Compatibility -AutoSize; continue }
             if ([string]::IsNullOrWhiteSpace($query)) { continue }
-            $themeMatches = @(Get-WindowsTerminalTheme -Search $query)
+            $themeMatches = @(Get-WindowsTerminalTheme @catalogOptions -Search $query)
             if ($themeMatches.Count -eq 0) { Write-Warning "No themes contain '$query'."; continue }
             if ($themeMatches.Count -eq 1) { $arguments.Theme = $themeMatches[0].Id; break }
             if ($themeMatches.Count -gt 30) { Write-Warning "$($themeMatches.Count) themes matched; refine the search."; continue }

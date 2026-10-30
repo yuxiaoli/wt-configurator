@@ -15,6 +15,7 @@ param(
     [string] $OutputDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'dist'),
     [string] $RightsEvidencePath,
     [switch] $ReleaseReady,
+    [switch] $PublicCatalogOnly,
     [switch] $SkipChecks
 )
 
@@ -24,7 +25,7 @@ $moduleRoot = Join-Path $projectRoot 'WTConfigurator'
 $manifestPath = Join-Path $moduleRoot 'WTConfigurator.psd1'
 $noticePath = Join-Path $projectRoot 'CATALOG-NOTICES.md'
 $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
-if ($manifest.Version -ne [version] '1.0.0') { throw 'Expected the WTConfigurator 1.0.0 manifest.' }
+if ($manifest.Version -ne [version] '1.1.0') { throw 'Expected the WTConfigurator 1.1.0 manifest.' }
 $rightsRecord = $null
 
 if ($ReleaseReady) {
@@ -73,14 +74,14 @@ $stagingRoot = Join-Path $outputRoot ('.stage-' + [guid]::NewGuid().ToString('N'
 $packageRoot = Join-Path $stagingRoot 'content'
 $packageModule = Join-Path $packageRoot 'WTConfigurator'
 $archivePath = Join-Path $stagingRoot 'package.zip'
-$finalPath = Join-Path $outputRoot ('WTConfigurator-' + $manifest.Version.ToString() + '.zip')
+$finalPath = Join-Path $outputRoot ('WTConfigurator-' + $manifest.Version.ToString() + $(if ($PublicCatalogOnly) { '-public-api' }) + '.zip')
 [void] [System.IO.Directory]::CreateDirectory($packageModule)
 try {
     $moduleFiles = @(
         (Join-Path $moduleRoot 'WTConfigurator.psd1'),
-        (Join-Path $moduleRoot 'WTConfigurator.psm1'),
-        (Join-Path $moduleRoot 'data/themes.json')
+        (Join-Path $moduleRoot 'WTConfigurator.psm1')
     )
+    if (-not $PublicCatalogOnly) { $moduleFiles += Join-Path $moduleRoot 'data/themes.json' }
     $privateRoot = Join-Path $moduleRoot 'Private'
     if (Test-Path -LiteralPath $privateRoot -PathType Container) {
         $moduleFiles += @(Get-ChildItem -LiteralPath $privateRoot -Filter '*.ps1' -Recurse -File | Select-Object -ExpandProperty FullName)
@@ -90,6 +91,10 @@ try {
         $destinationPath = Join-Path $packageModule $relativePath
         [void] [System.IO.Directory]::CreateDirectory((Split-Path $destinationPath -Parent))
         Copy-Item -LiteralPath $moduleFile -Destination $destinationPath -ErrorAction Stop
+    }
+    if ($PublicCatalogOnly) {
+        [void][IO.Directory]::CreateDirectory((Join-Path $packageModule 'data'))
+        [IO.File]::WriteAllText((Join-Path $packageModule 'data/source.json'), '{"default_source":"PublicCatalog"}', [Text.UTF8Encoding]::new($false))
     }
     foreach ($document in @('README.md', 'LICENSE', 'CATALOG-NOTICES.md', 'CHANGELOG.md', 'RELEASE.md')) {
         Copy-Item -LiteralPath (Join-Path $projectRoot $document) -Destination (Join-Path $packageModule $document) -ErrorAction Stop
@@ -101,7 +106,9 @@ try {
         version = $manifest.Version.ToString()
         project_uri = 'https://github.com/yuxiaoli/wt-configurator'
         readiness = $readiness
-        runtime_catalog_sha256 = (Get-FileHash -LiteralPath (Join-Path $packageModule 'data/themes.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+        runtime_catalog_sha256 = if ($PublicCatalogOnly) { $null } else { (Get-FileHash -LiteralPath (Join-Path $packageModule 'data/themes.json') -Algorithm SHA256).Hash.ToLowerInvariant() }
+        default_source = if ($PublicCatalogOnly) { 'PublicCatalog' } else { 'Bundled' }
+        bundled_third_party_theme_data = -not [bool]$PublicCatalogOnly
         rights_evidence_included = [bool] $ReleaseReady
     }
     [System.IO.File]::WriteAllText((Join-Path $packageModule 'PACKAGE-METADATA.json'), ($metadata | ConvertTo-Json -Depth 10) + "`n", [System.Text.UTF8Encoding]::new($false))
@@ -112,18 +119,24 @@ try {
     $verifyScriptPath = Join-Path $stagingRoot 'verify.ps1'
     $verifyScript = @'
 #requires -Version 5.1
-param([string] $ManifestPath, [string] $FixturePath)
+param([string] $ManifestPath, [string] $FixturePath, [switch] $PublicCatalogOnly)
 $ErrorActionPreference = 'Stop'
 $manifest = Test-ModuleManifest -Path $ManifestPath
-if ($manifest.Version -ne [version] '1.0.0') { throw 'Packaged manifest version mismatch.' }
+if ($manifest.Version -ne [version] '1.1.0') { throw 'Packaged manifest version mismatch.' }
 Import-Module $ManifestPath -Force
 $expected = @('Get-WindowsTerminalTheme', 'Get-WindowsTerminalProfile', 'Set-WindowsTerminalAppearance', 'Set-WindowsTerminalTheme', 'Restore-WindowsTerminalSettings')
 $actual = @(Get-Command -Module WTConfigurator | Select-Object -ExpandProperty Name)
 if (@(Compare-Object $expected $actual).Count -ne 0) { throw 'Packaged command exports differ from the public contract.' }
-if (@(Get-WindowsTerminalTheme).Count -eq 0) { throw 'Packaged catalog is empty.' }
+if ($PublicCatalogOnly) {
+    if (Test-Path (Join-Path (Split-Path $ManifestPath -Parent) 'data/themes.json')) { throw 'Public API package must not contain bundled palettes.' }
+    & (Get-Module WTConfigurator) { if ($script:DefaultThemeSource -cne 'PublicCatalog') { throw 'Public API package default source differs.' } }
+}
+elseif (@(Get-WindowsTerminalTheme).Count -eq 0) { throw 'Packaged catalog is empty.' }
 $original = [System.Text.UTF8Encoding]::new($false).GetBytes('{"profiles":{"defaults":{},"list":[]}}')
 [System.IO.File]::WriteAllBytes($FixturePath, $original)
-$change = Set-WindowsTerminalAppearance -SettingsPath $FixturePath -Theme 'catppuccin/mocha' -Opacity 85 -UseAcrylic $true -PassThru
+$appearance = @{ SettingsPath = $FixturePath; Opacity = 85; UseAcrylic = $true; PassThru = $true }
+if (-not $PublicCatalogOnly) { $appearance.Theme = 'catppuccin/mocha' }
+$change = Set-WindowsTerminalAppearance @appearance
 if (-not $change.Changed) { throw 'Packaged appearance flow did not change the fixture.' }
 $restore = Restore-WindowsTerminalSettings -SettingsPath $FixturePath -BackupPath $change.BackupPath -PassThru
 if (-not $restore.Changed) { throw 'Packaged restoration flow did not change the fixture.' }
@@ -153,9 +166,14 @@ if ([Convert]::ToBase64String($original) -cne [Convert]::ToBase64String($restore
     foreach ($engineName in @('powershell.exe', 'pwsh')) {
         $engineCommand = Get-Command $engineName -CommandType Application -ErrorAction Stop
         $fixturePath = Join-Path $stagingRoot ($engineName + '.settings.json')
-        & $engineCommand.Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $verifyScriptPath -ManifestPath $installedManifest -FixturePath $fixturePath
+        $verifyArguments = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$verifyScriptPath,'-ManifestPath',$installedManifest,'-FixturePath',$fixturePath)
+        if ($PublicCatalogOnly) { $verifyArguments += '-PublicCatalogOnly' }
+        & $engineCommand.Source @verifyArguments
         if ($LASTEXITCODE -ne 0) { throw "$engineName packaged import/appearance/restore verification failed." }
-        & $engineCommand.Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $installationRoot 'Set-WindowsTerminalTheme.ps1') -List | Out-Null
+        if ($PublicCatalogOnly) {
+            & $engineCommand.Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $installationRoot 'Set-WindowsTerminalTheme.ps1') -Opacity 90 -SettingsPath $fixturePath | Out-Null
+        }
+        else { & $engineCommand.Source -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $installationRoot 'Set-WindowsTerminalTheme.ps1') -List | Out-Null }
         if ($LASTEXITCODE -ne 0) { throw "$engineName packaged wrapper verification failed." }
     }
     [System.IO.File]::Move($archivePath, $finalPath, $true)

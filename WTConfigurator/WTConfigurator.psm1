@@ -1,7 +1,16 @@
 #requires -Version 5.1
 Set-StrictMode -Version 2.0
 $script:ThemeCatalog = $null
+$script:DefaultThemeSource = 'Bundled'
+$sourceConfigPath = Join-Path $PSScriptRoot 'data/source.json'
+if ([IO.File]::Exists($sourceConfigPath)) {
+    $sourceConfig = [IO.File]::ReadAllText($sourceConfigPath) | ConvertFrom-Json -ErrorAction Stop
+    if ($sourceConfig -isnot [pscustomobject] -or -not $sourceConfig.PSObject.Properties['default_source'] -or
+        $sourceConfig.default_source -cne 'PublicCatalog') { throw 'Invalid package theme source configuration.' }
+    $script:DefaultThemeSource = 'PublicCatalog'
+}
 . (Join-Path $PSScriptRoot 'Private/Settings.ps1')
+. (Join-Path $PSScriptRoot 'Private/PublicCatalog.ps1')
 
 function Get-RuntimeThemeCatalog {
     if ($null -eq $script:ThemeCatalog) {
@@ -51,12 +60,20 @@ function Get-RuntimeThemeCatalog {
 function Get-WindowsTerminalTheme {
     <#
     .SYNOPSIS
-    Lists or selects offline bundled Windows Terminal themes.
+    Lists or selects bundled or explicitly requested public Windows Terminal themes.
     .DESCRIPTION
     Exact selectors resolve an ID, a family/variant display name, then a unique variant name.
     Search is a literal case-insensitive substring. Results are independent objects suitable for pipelines.
     .PARAMETER Theme
     Exact stable ID, family/variant display name, or uniquely matching variant name.
+    .PARAMETER Source
+    Bundled (default, offline) or PublicCatalog (approved public API v1).
+    .PARAMETER CachePath
+    Optional directory for validated public API responses; no cache is written by default.
+    .PARAMETER Offline
+    Explicitly use the public cache without network; missing or invalid data fails closed.
+    .PARAMETER IncludeUnavailable
+    Include withheld public summary entries and reasons; they cannot be applied.
     .PARAMETER Search
     Literal case-insensitive substring of an ID or display name. No wildcard syntax is interpreted.
     .EXAMPLE
@@ -69,8 +86,17 @@ function Get-WindowsTerminalTheme {
         [Parameter(ParameterSetName = 'Exact', Mandatory = $true, Position = 0)]
         [ValidateNotNullOrEmpty()][string] $Theme,
         [Parameter(ParameterSetName = 'Search', Mandatory = $true)]
-        [AllowEmptyString()][string] $Search
+        [AllowEmptyString()][string] $Search,
+        [ValidateSet('Bundled','PublicCatalog')][string] $Source = $script:DefaultThemeSource,
+        [string] $CachePath,
+        [switch] $Offline,
+        [switch] $IncludeUnavailable
     )
+    if ($Source -eq 'PublicCatalog') {
+        Get-PublicTerminalTheme -Theme $Theme -Search $Search -CachePath $CachePath -Offline:$Offline -IncludeUnavailable:$IncludeUnavailable -NoCacheWrite:$WhatIfPreference
+        return
+    }
+    if ($CachePath -or $Offline -or $IncludeUnavailable) { throw 'CachePath, Offline and IncludeUnavailable require -Source PublicCatalog.' }
     $rows = @((Get-RuntimeThemeCatalog).themes)
     if ($PSCmdlet.ParameterSetName -eq 'Exact') {
         $selector = $Theme.Trim()
@@ -166,7 +192,7 @@ function ConvertTo-ManagedScheme {
         name = 'WTConfigurator/' + $Theme.Id
         background = $Theme.Palette.Background
         foreground = $Theme.Palette.Foreground
-        cursorColor = $Theme.Palette.Accent
+        cursorColor = if ($Theme.Palette.PSObject.Properties['Cursor']) { $Theme.Palette.Cursor } else { $Theme.Palette.Accent }
     }
     $keys = @('black', 'red', 'green', 'yellow', 'blue', 'purple', 'cyan', 'white', 'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightPurple', 'brightCyan', 'brightWhite')
     for ($index = 0; $index -lt 16; $index++) { $scheme[$keys[$index]] = $Theme.Palette.Ansi[$index] }
@@ -193,16 +219,22 @@ function Set-AppearanceValue {
 function Set-WindowsTerminalAppearance {
     <#
     .SYNOPSIS
-    Applies a bundled theme, opacity, or acrylic to defaults or one profile.
+    Applies a selected-source theme, opacity, or acrylic to defaults or one profile.
     .DESCRIPTION
     Opacity is percent opaque (0-100); acrylic adds blur. Omitted values and unfocused overrides are retained.
     Updates normalize JSONC and back up exact bytes unless NoBackup is explicitly specified.
     .PARAMETER Theme
-    Exact bundled theme ID or unambiguous name. Replaces the target's light/dark pair with one scheme.
+    Exact theme ID or unambiguous name in the selected source. Replaces the target's light/dark pair with one scheme.
     .PARAMETER Opacity
     One integral percentage from 0 to 100, representing percent opaque. Fractional percentages are rejected.
     .PARAMETER UseAcrylic
     Explicit true or false to change background blur. Omission preserves the existing value.
+    .PARAMETER Source
+    Bundled (default) or PublicCatalog. Public settings updates include provenance in PassThru.
+    .PARAMETER CachePath
+    Optional directory for validated public responses. WhatIf does not write the cache.
+    .PARAMETER Offline
+    Explicitly use cached public responses, without network or silent bundled fallback.
     .PARAMETER TargetProfile
     An existing profile GUID or unique exact name. Alias: Profile. Omission targets profile defaults.
     .PARAMETER SettingsPath
@@ -229,6 +261,9 @@ function Set-WindowsTerminalAppearance {
         [bool] $UseAcrylic,
         [Alias('Profile')][ValidateNotNullOrEmpty()][string] $TargetProfile,
         [string] $SettingsPath,
+        [ValidateSet('Bundled','PublicCatalog')][string] $Source = $script:DefaultThemeSource,
+        [string] $CachePath,
+        [switch] $Offline,
         [switch] $NoBackup,
         [switch] $PassThru
     )
@@ -237,7 +272,8 @@ function Set-WindowsTerminalAppearance {
     $hasAcrylic = $PSBoundParameters.ContainsKey('UseAcrylic')
     if ($hasOpacity -and $Opacity -is [Collections.IEnumerable] -and $Opacity -isnot [string]) { throw 'Opacity must be a single integer percentage from 0 to 100.' }
     if (-not ($hasTheme -or $hasOpacity -or $hasAcrylic)) { throw 'Supply at least one of -Theme, -Opacity, or -UseAcrylic.' }
-    $selectedTheme = if ($hasTheme) { Get-WindowsTerminalTheme -Theme $Theme } else { $null }
+    if (-not $hasTheme -and ($PSBoundParameters.ContainsKey('Source') -or $CachePath -or $Offline)) { throw 'Public catalog options require -Theme.' }
+    $selectedTheme = if ($hasTheme) { Get-WindowsTerminalTheme -Theme $Theme -Source $Source -CachePath $CachePath -Offline:$Offline } else { $null }
     $path = Resolve-TerminalSettingsPath -ExplicitPath $SettingsPath
     $mutex = Enter-TerminalMutex -Path $path
     try {
@@ -278,6 +314,8 @@ function Set-WindowsTerminalAppearance {
             SettingsPath = $path
             Target = $targetName
             ThemeId = if ($selectedTheme) { $selectedTheme.Id } else { $null }
+            ThemeSource = if ($selectedTheme) { $Source } else { $null }
+            ThemeProvenance = if ($selectedTheme -and $Source -eq 'PublicCatalog') { [pscustomobject]@{ ApiVersion = $selectedTheme.ApiVersion; CatalogUrl = $selectedTheme.CatalogUrl; CatalogIndexSHA256 = $selectedTheme.CatalogIndexSHA256; ContentSHA256 = $selectedTheme.ContentSHA256; SourceRevision = $selectedTheme.SourceRevision; SourceUrl = $selectedTheme.SourceUrl; CacheStatus = $selectedTheme.CacheStatus; License = $selectedTheme.License } } else { $null }
             ChangedProperties = [string[]]$changes.ToArray()
             BackupPath = $null
             Changed = $false
@@ -305,9 +343,15 @@ function Set-WindowsTerminalAppearance {
 function Set-WindowsTerminalTheme {
     <#
     .SYNOPSIS
-    Applies one bundled theme to Windows Terminal defaults or one stored profile.
+    Applies one selected-source theme to Windows Terminal defaults or one stored profile.
     .PARAMETER Theme
-    Exact bundled theme ID or unambiguous name.
+    Exact theme ID or unambiguous name in the selected source.
+    .PARAMETER Source
+    Bundled (default) or PublicCatalog. Public settings updates include provenance in PassThru.
+    .PARAMETER CachePath
+    Optional directory for validated public responses. WhatIf does not write the cache.
+    .PARAMETER Offline
+    Explicitly use cached public responses, without network or silent bundled fallback.
     .PARAMETER TargetProfile
     An existing profile GUID or unique exact name. Alias: Profile. Omission targets profile defaults.
     .PARAMETER SettingsPath
@@ -324,6 +368,9 @@ function Set-WindowsTerminalTheme {
         [Parameter(Mandatory = $true, Position = 0)][ValidateNotNullOrEmpty()][string] $Theme,
         [Alias('Profile')][ValidateNotNullOrEmpty()][string] $TargetProfile,
         [string] $SettingsPath,
+        [ValidateSet('Bundled','PublicCatalog')][string] $Source = $script:DefaultThemeSource,
+        [string] $CachePath,
+        [switch] $Offline,
         [switch] $NoBackup,
         [switch] $PassThru
     )

@@ -1,7 +1,7 @@
 # WTConfigurator
 
 Choose Windows Terminal color themes and set terminal opacity from PowerShell.
-WTConfigurator 1.0.0 uses the bundled 112-theme [TerminalColors](https://terminalcolors.com/)
+A source checkout of WTConfigurator 1.1.0 defaults to the bundled 112-theme [TerminalColors](https://terminalcolors.com/)
 snapshot offline. Importing the module does not contact a service or change settings.
 
 Supports Windows PowerShell 5.1 and PowerShell 7 on Windows 10/11, with Windows
@@ -10,7 +10,15 @@ Project home: [yuxiaoli/wt-configurator](https://github.com/yuxiaoli/wt-configur
 
 ## Install and use
 
-From a source checkout:
+The `WTConfigurator-1.1.0-public-api.zip` package contains the API client and no
+bundled third-party palettes. Extract and import `WTConfigurator/WTConfigurator.psd1`.
+In this package, theme listing/selection defaults to `PublicCatalog` and requires
+network access unless an explicit cache is used with `-Offline`. Import itself
+and opacity-only changes remain offline. `-Source Bundled` is unavailable in this
+package. The existing source checkout and legacy local package retain their bundled
+default; the command examples below identify bundled source use.
+
+From a source checkout (legacy bundled catalogue):
 
 ```powershell
 Import-Module .\WTConfigurator\WTConfigurator.psd1
@@ -35,7 +43,7 @@ Set-WindowsTerminalTheme -Theme 'ayu/mirage' -WhatIf
 ```
 
 For a locally built ZIP, extract it into a directory on `$env:PSModulePath` and
-run `Import-Module WTConfigurator -RequiredVersion 1.0.0`. Alternatively, import
+run `Import-Module WTConfigurator -RequiredVersion 1.1.0`. Alternatively, import
 the extracted `WTConfigurator\WTConfigurator.psd1` by its full path. The
 package has no runtime module dependencies. See [RELEASE.md](RELEASE.md) for build
 and rights requirements; a local package is not automatically ready for public release.
@@ -51,6 +59,64 @@ The original entry script remains available:
 
 If local execution policy blocks a downloaded script, review the file and use
 `Unblock-File` or an appropriate process-scoped policy for your environment.
+
+## Public terminal catalogue
+
+Use `-Source PublicCatalog` explicitly on the same commands or interactive wrapper.
+The only network source is the approved [public API v1 export](https://yuxiaoli.github.io/themes-catalog-api/api/v1/index.json).
+Importing the module and using the default `Bundled` source remain offline.
+
+```powershell
+Get-WindowsTerminalTheme -Source PublicCatalog -Search 'Spaceduck'
+$theme = Get-WindowsTerminalTheme -Source PublicCatalog -Theme 'Spaceduck'
+$theme | Format-List Id, SourceRevision, ContentSHA256, License, LicenseDocuments
+
+# Preview and apply to an explicit disposable settings file.
+Set-WindowsTerminalTheme -Source PublicCatalog -Theme $theme.Id `
+    -SettingsPath .\fixture\settings.json -WhatIf
+$result = Set-WindowsTerminalTheme -Source PublicCatalog -Theme $theme.Id `
+    -SettingsPath .\fixture\settings.json -PassThru
+Restore-WindowsTerminalSettings -SettingsPath $result.SettingsPath -BackupPath $result.BackupPath
+
+# Opt-in cache; an exact selection caches the index and that theme's full response.
+Get-WindowsTerminalTheme -Source PublicCatalog -Theme $theme.Id -CachePath .\theme-cache
+Set-WindowsTerminalTheme -Source PublicCatalog -Theme $theme.Id `
+    -Offline -CachePath .\theme-cache -SettingsPath .\fixture\settings.json
+
+# Inspect withheld names/reasons without fetching or applying them.
+Get-WindowsTerminalTheme -Source PublicCatalog -IncludeUnavailable
+.\Set-WindowsTerminalTheme.ps1 -Source PublicCatalog -SettingsPath .\fixture\settings.json
+```
+
+Public lists return summaries with `Available`, `Compatibility`, `WithheldCount`
+and stable namespaced IDs. `RequiresPaletteValidation` means the format is supported
+but its full palette has not yet been fetched. Exact selection fetches and validates
+it, returning `Compatibility = Validated`, palette, license links, API version,
+index/content SHA-256 and source revision. Names may be ambiguous; choose an ID.
+The update's `ThemeProvenance` carries these identifiers without adding metadata to
+Terminal settings. Hashes identify received content; they are not digital signatures.
+
+API v1 paths resolve relative to the Pages root. The consumer accepts only the
+terminal category and Gogh format, validates the index identity against its payload,
+and requires background, foreground, cursor, accent and exactly 16 opaque RGB colors.
+ANSI indexes map directly to Terminal's normal/bright slots; `cursor` maps to
+`cursorColor`. No indexed/alpha/editor palette conversion or guessed colors occur.
+Other formats and withheld entries are reported explicitly and cannot be applied.
+The initial export has 1,251 available and 112 withheld terminal entries; live
+counts are read from the index. Withheld entries never fall back to bundled data.
+The legacy bundled catalogue has its own unresolved rights status (see notices).
+
+No cache is created by default. With `-CachePath`, only validated raw JSON responses
+are stored, using atomic replacement. Online calls always request the current API;
+network failure fails before settings discovery or writing, with no silent stale
+fallback. `-Offline` is an explicit choice to use a possibly old snapshot; every
+cached document is revalidated and a missing/corrupt entry fails closed. Cache write
+failure warns but leaves the validated online result usable. `-WhatIf` also prevents
+cache writes. The client rejects redirects/non-JSON responses, limits each response
+to 4 MiB, and uses 20-second connect/read timeouts with normal system TLS validation.
+No credentials are sent and upstream/private source URLs are never fetched.
+Cache snapshots can become stale or withdrawn; refresh online before relying on
+current availability. No automatic schedule or background update is installed.
 
 ## Commands and selection
 
@@ -157,5 +223,23 @@ Maintainer tools use PowerShell 7 and retain source provenance:
 Refresh discovers public theme families and extracts SVG palettes by semantic
 ANSI labels. A fetch, extraction, coverage, hash, or validation failure leaves
 the canonical snapshot and runtime catalog intact. Refresh requires a network;
-normal module use remains offline. Code is MIT-licensed; catalog data and stored
+bundled theme use remains offline; the public source is opt-in. Code is MIT-licensed; catalog data and stored
 HTML/SVG documents have separate rights. Read [CATALOG-NOTICES.md](CATALOG-NOTICES.md).
+
+## Source downloads
+
+GitHub source ZIP/tarball downloads exclude the legacy runtime palette file
+and the snapshot containing captured HTML/SVG. Both remain in Git checkouts
+and history; archive exclusion does not establish redistribution rights.
+The source archive retains the module, wrapper, license, documentation and tools.
+Import its module and specify `-Source PublicCatalog` when selecting a theme:
+
+```powershell
+Import-Module .\WTConfigurator\WTConfigurator.psd1
+Get-WindowsTerminalTheme -Source PublicCatalog -Search 'Spaceduck'
+```
+
+Use the built `WTConfigurator-1.1.0-public-api.zip` for installation with the
+public source selected by default. Legacy catalog rebuild/full project checks
+require a Git checkout because source downloads intentionally omit their inputs.
+See RELEASE.md for verification of actual GitHub archives and release limits.
