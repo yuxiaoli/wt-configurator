@@ -39,7 +39,7 @@ if ($Worker) {
     $env:PSModulePath = $dependencyRoot + [System.IO.Path]::PathSeparator + $env:PSModulePath
     Import-Module $pesterManifest -RequiredVersion 5.9.1 -Force -ErrorAction Stop
     $manifest = Test-ModuleManifest -Path $moduleManifest -ErrorAction Stop
-    if ($manifest.Version -ne [version] '1.0.0' -or $manifest.Author -ne 'Sean') {
+    if ($manifest.Version -ne [version] '1.1.0' -or $manifest.Author -ne 'Sean') {
         throw 'WTConfigurator manifest version/author differs from the v1 release contract.'
     }
     if (@(Get-ChildItem -LiteralPath $testRoot -Filter '*.Tests.ps1' -File).Count -eq 0) {
@@ -55,7 +55,7 @@ if ($Worker) {
     $configuration.Run.Exit = $false
     $configuration.Output.Verbosity = 'Detailed'
     $results = Invoke-Pester -Configuration $configuration
-    if ($results.FailedCount -gt 0 -or $results.TotalCount -eq 0) {
+    if ($results.Result -ne 'Passed' -or $results.FailedCount -gt 0 -or $results.TotalCount -eq 0) {
         throw "$Engine Pester validation failed: $($results.FailedCount) failed of $($results.TotalCount)."
     }
 

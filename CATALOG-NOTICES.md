@@ -26,3 +26,13 @@ their scope and evidence, retain required creator notices, and complete the
 rights checklist in [RELEASE.md](RELEASE.md). If permission does not cover the
 existing archives, remove or replace them in a separately reviewed source-data
 change before declaring public readiness.
+
+## Opt-in public API source (1.1.0)
+
+The public consumer reads only https://yuxiaoli.github.io/themes-catalog-api/.
+It does not bundle that export or access the private source repository. Gogh
+responses retain source commit, record identity, upstream license expression and
+links to the public export's retained notices. The API's 112 withheld terminal
+entries are metadata only and cannot be fetched/applied through this source.
+The existing bundled TerminalColors data is unchanged; its unresolved rights gate
+above remains in force. A public endpoint is not a license for unrelated data.
