@@ -11,8 +11,8 @@ BeforeAll {
 }
 
 Describe 'Offline public catalog commands' {
-    It 'exports exactly the five intended commands' {
-        @(Get-Command -Module WTConfigurator).Count | Should -Be 5
+    It 'exports exactly the seven intended commands' {
+        @(Get-Command -Module WTConfigurator).Count | Should -Be 7
     }
     It 'lists 112 structured themes with 16 colors and source provenance' {
         $themes = @(Get-WindowsTerminalTheme)

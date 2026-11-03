@@ -11,6 +11,7 @@ if ([IO.File]::Exists($sourceConfigPath)) {
 }
 . (Join-Path $PSScriptRoot 'Private/Settings.ps1')
 . (Join-Path $PSScriptRoot 'Private/PublicCatalog.ps1')
+. (Join-Path $PSScriptRoot 'Private/RemoteTheme.ps1')
 
 function Get-RuntimeThemeCatalog {
     if ($null -eq $script:ThemeCatalog) {
@@ -74,6 +75,8 @@ function Get-WindowsTerminalTheme {
     Explicitly use the public cache without network; missing or invalid data fails closed.
     .PARAMETER IncludeUnavailable
     Include withheld public summary entries and reasons; they cannot be applied.
+    .PARAMETER Popular
+    Filter confirmed Gogh popular members from the public catalogue; unknown is excluded.
     .PARAMETER Search
     Literal case-insensitive substring of an ID or display name. No wildcard syntax is interpreted.
     .EXAMPLE
@@ -90,13 +93,14 @@ function Get-WindowsTerminalTheme {
         [ValidateSet('Bundled','PublicCatalog')][string] $Source = $script:DefaultThemeSource,
         [string] $CachePath,
         [switch] $Offline,
-        [switch] $IncludeUnavailable
+        [switch] $IncludeUnavailable,
+        [switch] $Popular
     )
     if ($Source -eq 'PublicCatalog') {
-        Get-PublicTerminalTheme -Theme $Theme -Search $Search -CachePath $CachePath -Offline:$Offline -IncludeUnavailable:$IncludeUnavailable -NoCacheWrite:$WhatIfPreference
+        Get-PublicTerminalTheme -Theme $Theme -Search $Search -CachePath $CachePath -Offline:$Offline -IncludeUnavailable:$IncludeUnavailable -Popular:$Popular -NoCacheWrite:$WhatIfPreference
         return
     }
-    if ($CachePath -or $Offline -or $IncludeUnavailable) { throw 'CachePath, Offline and IncludeUnavailable require -Source PublicCatalog.' }
+    if ($CachePath -or $Offline -or $IncludeUnavailable -or $Popular) { throw 'CachePath, Offline, IncludeUnavailable and Popular require -Source PublicCatalog. Use Get-WindowsTerminalRemoteTheme for remote discovery.' }
     $rows = @((Get-RuntimeThemeCatalog).themes)
     if ($PSCmdlet.ParameterSetName -eq 'Exact') {
         $selector = $Theme.Trim()
@@ -425,4 +429,4 @@ function Restore-WindowsTerminalSettings {
     finally { $mutex.ReleaseMutex(); $mutex.Dispose() }
 }
 
-Export-ModuleMember -Function Get-WindowsTerminalTheme, Get-WindowsTerminalProfile, Set-WindowsTerminalAppearance, Set-WindowsTerminalTheme, Restore-WindowsTerminalSettings
+Export-ModuleMember -Function Get-WindowsTerminalRemoteTheme, Sync-WindowsTerminalTheme, Get-WindowsTerminalTheme, Get-WindowsTerminalProfile, Set-WindowsTerminalAppearance, Set-WindowsTerminalTheme, Restore-WindowsTerminalSettings

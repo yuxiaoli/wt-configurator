@@ -124,7 +124,7 @@ $ErrorActionPreference = 'Stop'
 $manifest = Test-ModuleManifest -Path $ManifestPath
 if ($manifest.Version -ne [version] '1.1.0') { throw 'Packaged manifest version mismatch.' }
 Import-Module $ManifestPath -Force
-$expected = @('Get-WindowsTerminalTheme', 'Get-WindowsTerminalProfile', 'Set-WindowsTerminalAppearance', 'Set-WindowsTerminalTheme', 'Restore-WindowsTerminalSettings')
+$expected = @('Get-WindowsTerminalRemoteTheme', 'Sync-WindowsTerminalTheme', 'Get-WindowsTerminalTheme', 'Get-WindowsTerminalProfile', 'Set-WindowsTerminalAppearance', 'Set-WindowsTerminalTheme', 'Restore-WindowsTerminalSettings')
 $actual = @(Get-Command -Module WTConfigurator | Select-Object -ExpandProperty Name)
 if (@(Compare-Object $expected $actual).Count -ne 0) { throw 'Packaged command exports differ from the public contract.' }
 if ($PublicCatalogOnly) {

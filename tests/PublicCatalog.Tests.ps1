@@ -2,6 +2,16 @@ Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'WTConfigurator/WTCo
 Describe 'Public terminal catalog contract and transactions' {
     InModuleScope WTConfigurator {
         BeforeAll {
+            function Add-PopularFixture {
+                $flags = [pscustomobject]@{}
+                $flags | Add-Member -NotePropertyName $script:fixtureId -NotePropertyValue $true
+                $script:indexData | Add-Member -NotePropertyName popularity -NotePropertyValue ([pscustomobject]@{
+                    version='1'; catalog_source_revision=('b' * 40)
+                    source=[pscustomobject]@{ repository='Gogh-Co/gogh-website'; revision=('c' * 40); url=('https://github.com/Gogh-Co/gogh-website/blob/' + ('c' * 40) + '/app/pages/index.vue') }
+                    flags=$flags; order=@($script:fixtureId); unmatched=@(); unavailable=@()
+                })
+            }
+
             function New-PublicFixtureData {
                 $script:fixtureId = 'gogh/' + ('a' * 64)
                 $script:fixturePath = Get-PublicThemePath $script:fixtureId
@@ -200,6 +210,121 @@ Describe 'Public terminal catalog contract and transactions' {
             { Set-WindowsTerminalTheme -Source PublicCatalog -Theme Fixture -SettingsPath $path } | Should -Throw '*request failed*'
             @(Get-ChildItem ($path + '*')).Count | Should -Be 1
             [Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) | Should -BeExactly $before
+        }
+
+        It 'offers a remote shortcut independent of the bundled default and never resolves settings' {
+            Mock Resolve-TerminalSettingsPath { throw 'Must not inspect settings' }
+            $rows = @(Get-WindowsTerminalRemoteTheme -IncludeUnavailable)
+            $rows.Count | Should -Be 2
+            $rows[0].Source | Should -BeExactly 'PublicCatalog'
+            Should -Invoke Resolve-TerminalSettingsPath -Times 0
+            Should -Invoke Get-PublicCatalogText -Times 2 -Exactly
+        }
+        It 'keeps missing popularity unknown and fails an explicit popular request clearly' {
+            $row = Get-WindowsTerminalRemoteTheme
+            ($null -eq $row.Popular) | Should -BeTrue
+            { Get-WindowsTerminalRemoteTheme -Popular } | Should -Throw '*no popularity metadata*'
+            { Get-WindowsTerminalTheme -Source PublicCatalog -Theme Fixture -Popular } | Should -Throw '*no popularity metadata*'
+        }
+        It 'filters true membership and preserves explicit false versus unknown' {
+            Add-PopularFixture
+            $rows = @(Get-WindowsTerminalRemoteTheme -Popular -IncludeUnavailable)
+            $rows.Count | Should -Be 1
+            $rows[0].Popular | Should -BeTrue
+            $rows[0].PopularitySourceRevision | Should -BeExactly ('c' * 40)
+            (Get-WindowsTerminalTheme -Source PublicCatalog -Theme Fixture -Popular).Popular | Should -BeTrue
+            $script:indexData.popularity.flags.($script:fixtureId) = $false
+            $script:indexData.popularity.order = @()
+            @(Get-WindowsTerminalRemoteTheme -Popular).Count | Should -Be 0
+            (Get-WindowsTerminalRemoteTheme).Popular | Should -BeFalse
+            { Get-WindowsTerminalTheme -Source PublicCatalog -Theme Fixture -Popular } | Should -Throw '*not a confirmed popular member*'
+            @(Get-WindowsTerminalRemoteTheme -IncludeUnavailable | Where-Object { $null -eq $_.Popular }).Count | Should -Be 1
+        }
+        It 'rejects malformed popularity case <Case>' -TestCases @(
+            @{Case='string'},@{Case='unknown'},@{Case='order'},@{Case='revision'},@{Case='version'}
+        ) {
+            param($Case)
+            Add-PopularFixture
+            switch ($Case) {
+                string { $script:indexData.popularity.flags.($script:fixtureId) = 'true' }
+                unknown { $script:indexData.popularity.flags | Add-Member -NotePropertyName 'gogh/unknown' -NotePropertyValue $false }
+                order { $script:indexData.popularity.order += $script:fixtureId }
+                revision { $script:indexData.popularity.source.revision = 'latest' }
+                version { $script:indexData.popularity.version = '2' }
+            }
+            { Get-WindowsTerminalRemoteTheme } | Should -Throw '*popularity*'
+        }
+        It 'syncs compatible palettes once and enables exact offline selection without settings access' {
+            Add-PopularFixture
+            Mock Resolve-TerminalSettingsPath { throw 'Must not inspect settings' }
+            $cache = Join-Path $TestDrive 'synced'
+            $result = Sync-WindowsTerminalTheme -CachePath $cache -Popular
+            $result.SyncedCount | Should -Be 1
+            (Get-WindowsTerminalTheme -Source PublicCatalog -Theme Fixture -CachePath $cache -Offline).Palette.Cursor | Should -BeExactly '#123456'
+            @(Get-WindowsTerminalRemoteTheme -CachePath $cache -Offline -Popular).Count | Should -Be 1
+            Should -Invoke Get-PublicCatalogText -Times 3 -Exactly
+            Should -Invoke Resolve-TerminalSettingsPath -Times 0
+        }
+        It 'sync WhatIf creates no cache and makes no network request' {
+            $cache = Join-Path $TestDrive 'sync-whatif'
+            Sync-WindowsTerminalTheme -CachePath $cache -WhatIf
+            Test-Path -LiteralPath $cache | Should -BeFalse
+            Should -Invoke Get-PublicCatalogText -Times 0 -Exactly
+        }
+        It 'sync rejects invalid palettes without poisoning an existing validated cache' {
+            $cache = Join-Path $TestDrive 'sync-failure'
+            Sync-WindowsTerminalTheme -CachePath $cache | Out-Null
+            $script:themeData.theme.palette.cursor = 'invalid'
+            { Sync-WindowsTerminalTheme -CachePath $cache } | Should -Throw '*stopped after 0 of 1*'
+            (Get-WindowsTerminalTheme -Source PublicCatalog -Theme Fixture -CachePath $cache -Offline).Palette.Cursor | Should -BeExactly '#123456'
+        }
+        It 'sync reports cache-write failures instead of claiming success' {
+            $cache = Join-Path $TestDrive 'not-a-directory'
+            [IO.File]::WriteAllText($cache, 'occupied')
+            { Sync-WindowsTerminalTheme -CachePath $cache -WarningAction SilentlyContinue } | Should -Throw '*stopped after 0 of 1*'
+        }
+        It 'sync search does not download unrelated or withheld palettes' {
+            $cache = Join-Path $TestDrive 'sync-search'
+            (Sync-WindowsTerminalTheme -CachePath $cache -Search '*').SyncedCount | Should -Be 0
+            Should -Invoke Get-PublicCatalogText -Times 0 -ParameterFilter { $Path -like '*/themes/*' }
+        }
+
+
+        It 'syncs every matching palette and preserves upstream order across multiple entries' {
+            Add-PopularFixture
+            $other = $script:indexData.entries[0] | ConvertTo-Json | ConvertFrom-Json
+            $other.id = 'gogh/' + ('d' * 64); $other.name = 'Second'; $other.path = Get-PublicThemePath $other.id
+            $script:indexData.entries += $other
+            $script:indexData.available_count++; $script:indexData.source_count++
+            $script:indexData.popularity.flags | Add-Member -NotePropertyName $other.id -NotePropertyValue $true
+            $script:indexData.popularity.order = @($other.id, $script:fixtureId)
+            $script:secondTheme = $script:themeData | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+            $script:secondTheme.theme.id = $other.id
+            $script:secondTheme.theme.name = 'Second'
+            $script:secondTheme.theme.source_theme_id = 'd' * 64
+            $script:secondTheme.theme.provenance.record_sha256 = 'd' * 64
+            Mock Get-PublicCatalogText {
+                param($Path)
+                switch ($Path) {
+                    'api/v1/index.json' { return $script:rootJson }
+                    'api/v1/terminal/index.json' { return ($script:indexData | ConvertTo-Json -Depth 30 -Compress) }
+                    $script:fixturePath { return ($script:themeData | ConvertTo-Json -Depth 30 -Compress) }
+                    default { return ($script:secondTheme | ConvertTo-Json -Depth 30 -Compress) }
+                }
+            }
+            @(Get-WindowsTerminalRemoteTheme -Popular)[0].DisplayName | Should -BeExactly 'Second'
+            $cache = Join-Path $TestDrive 'multi-sync'
+            (Sync-WindowsTerminalTheme -CachePath $cache).SyncedCount | Should -Be 2
+            (Get-WindowsTerminalTheme -Source PublicCatalog -Theme Second -CachePath $cache -Offline).Id | Should -BeExactly $other.id
+            $script:secondTheme.theme.palette.cursor = 'invalid'
+            { Sync-WindowsTerminalTheme -CachePath $cache } | Should -Throw '*stopped after 1 of 2*'
+            (Get-WindowsTerminalTheme -Source PublicCatalog -Theme Second -CachePath $cache -Offline).Palette.Cursor | Should -BeExactly '#123456'
+        }
+
+        It 'does not silently skip available unsupported formats during an all-theme sync' {
+            $script:indexData.entries[0].format = 'unsupported'
+            { Sync-WindowsTerminalTheme -CachePath (Join-Path $TestDrive 'unsupported-sync') } | Should -Throw '*unsupported formats*'
+            Should -Invoke Get-PublicCatalogText -Times 0 -ParameterFilter { $Path -like '*/themes/*' }
         }
     }
 }

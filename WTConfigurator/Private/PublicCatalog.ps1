@@ -55,6 +55,7 @@ function Assert-PublicCatalogDocument {
             if ($row.path -cne (Get-PublicThemePath $row.id)) { throw 'Public theme path does not match its stable ID.' }
         }
         foreach ($row in $Document.excluded) { Assert-CatalogObject $row @('reason'); Assert-CatalogString $row.reason }
+        Assert-PublicPopularity -Document $Document
         return
     }
     Assert-CatalogObject $Document @('theme')
@@ -151,11 +152,15 @@ function Read-PublicCatalogDocument {
 }
 
 function Get-PublicTerminalTheme {
-    param([string] $Theme, [string] $Search, [string] $CachePath, [switch] $Offline, [switch] $IncludeUnavailable, [switch] $NoCacheWrite)
+    param([string] $Theme, [string] $Search, [string] $CachePath, [switch] $Offline, [switch] $IncludeUnavailable, [switch] $NoCacheWrite, [switch] $Popular)
     $options = @{ CachePath = $CachePath; Offline = $Offline; NoCacheWrite = $NoCacheWrite }
     $root = Read-PublicCatalogDocument -Path 'api/v1/index.json' -Kind Root @options
     $catalog = Read-PublicCatalogDocument -Path $root.Document.categories.terminal.path -Kind Index @options
     $rows = @($catalog.Document.entries)
+    $popularityRevision = if ($catalog.Document.PSObject.Properties['popularity']) { $catalog.Document.popularity.source.revision } else { $null }
+    if ($Popular -and -not $catalog.Document.PSObject.Properties['popularity']) {
+        throw 'This public catalogue snapshot has no popularity metadata. Refresh the cache after the API update is published; unknown does not mean false.'
+    }
     if ($Theme) {
         $selector = $Theme.Trim()
         $selected = @($rows | Where-Object { $_.id -ieq $selector })
@@ -167,6 +172,7 @@ function Get-PublicTerminalTheme {
         }
         if ($selected.Count -gt 1) { throw "Theme '$Theme' is ambiguous. Select an ID: $(($selected.id | Sort-Object) -join ', ')." }
         $row = $selected[0]
+        if ($Popular -and (Get-PublicPopularityValue $catalog.Document $row.id) -ne $true) { throw "Theme '$Theme' is not a confirmed popular member." }
         if ($row.format -cne 'gogh' -or $row.source_id -cne 'gogh') { throw "Incompatible public theme format '$($row.format)' from '$($row.source_id)'." }
         $response = Read-PublicCatalogDocument -Path $row.path -Kind Theme -Entry $row @options
         $item = $response.Document.theme
@@ -179,11 +185,14 @@ function Get-PublicTerminalTheme {
             SourceRevision = $item.publication.source_revision; Provenance = $item.provenance
             License = $item.license; LicenseDocuments = @($item.publication.license_documents | ForEach-Object { $script:PublicCatalogRoot + $_ })
             CacheStatus = $response.Mode; Available = $true; Compatibility = 'Validated'
+            Popular = Get-PublicPopularityValue $catalog.Document $row.id; PopularitySourceRevision = $popularityRevision
             Palette = [pscustomobject]@{ Background = $item.palette.background; Foreground = $item.palette.foreground; Accent = $item.palette.accent; Cursor = $item.palette.cursor; Ansi = [string[]]@($item.palette.ansi) }
         }
     }
     if ($IncludeUnavailable) { $rows += @($catalog.Document.excluded) }
-    foreach ($row in ($rows | Sort-Object name,id)) {
+    if ($Popular) { $rows = @(Select-PublicPopularRow -Index $catalog.Document -Rows $rows) }
+    else { $rows = @($rows | Sort-Object name,id) }
+    foreach ($row in $rows) {
         if ($Search -and $row.name.IndexOf($Search,[StringComparison]::OrdinalIgnoreCase) -lt 0 -and $row.id.IndexOf($Search,[StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
         $available = -not [bool]$row.PSObject.Properties['reason']
         $compatibility = if (-not $available) { 'Withheld: ' + $row.reason } elseif ($row.format -ceq 'gogh' -and $row.source_id -ceq 'gogh') { 'RequiresPaletteValidation' } else { 'UnsupportedFormat: ' + $row.format }
@@ -192,6 +201,7 @@ function Get-PublicTerminalTheme {
             Source = 'PublicCatalog'; SourceId = $row.source_id; Available = $available; Compatibility = $compatibility
             ApiVersion = '1'; CatalogIndexSHA256 = $catalog.Hash; CacheStatus = $catalog.Mode
             AvailableCount = $catalog.Document.available_count; WithheldCount = $catalog.Document.excluded_count
+            Popular = Get-PublicPopularityValue $catalog.Document $row.id; PopularitySourceRevision = $popularityRevision
         }
     }
 }
