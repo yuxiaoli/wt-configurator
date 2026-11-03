@@ -243,3 +243,67 @@ Use the built `WTConfigurator-1.1.0-public-api.zip` for installation with the
 public source selected by default. Legacy catalog rebuild/full project checks
 require a Git checkout because source downloads intentionally omit their inputs.
 See RELEASE.md for verification of actual GitHub archives and release limits.
+
+## Quick remote discovery (unreleased feature)
+
+After importing this feature's module, these commands always use the public
+**terminal** category, regardless of the source checkout's bundled default:
+
+```powershell
+Get-WindowsTerminalRemoteTheme                       # All remote summaries
+Get-WindowsTerminalRemoteTheme -Search 'catppuccin'
+Get-WindowsTerminalRemoteTheme -Popular               # Confirmed Gogh subset
+Get-WindowsTerminalRemoteTheme -IncludeUnavailable    # Also show withheld reasons
+Get-Help Get-WindowsTerminalRemoteTheme -Full
+```
+
+Listing fetches only the root and terminal indexes. It does not download every
+palette or inspect/change Windows Terminal settings. Output includes stable
+`Id`, `Popular` (true/false/null), and `PopularitySourceRevision`. Popular
+members retain Gogh's declaration order; that order is not a live ranking.
+Missing flags mean unknown. No popularity is inferred from names, editor themes
+or conversion. `Get-WindowsTerminalTheme -Source PublicCatalog -Popular` is also
+supported. An older API/cache with no popularity metadata produces an actionable
+error for `-Popular`; normal remote listing continues to work.
+
+To download all compatible public palettes for later offline use, explicitly
+choose a cache directory. Add `-Popular` or a literal `-Search` to narrow it:
+
+```powershell
+Sync-WindowsTerminalTheme -CachePath .\theme-cache -WhatIf
+Sync-WindowsTerminalTheme -CachePath .\theme-cache
+Sync-WindowsTerminalTheme -CachePath .\popular-cache -Popular
+Get-WindowsTerminalRemoteTheme -CachePath .\popular-cache -Offline -Popular
+Get-WindowsTerminalTheme -Source PublicCatalog -Theme 'Dracula' -CachePath .\popular-cache -Offline
+```
+
+Sync downloads each selected available palette from the approved API, validates it, verifies the
+saved cache, and returns `SyncedCount`. Unsupported available formats cause an explicit error before palette downloads. It never applies a theme. It stops on a
+failure with a completed count; already validated files remain. A subset cache
+can list all indexed themes, but offline palette selection only succeeds for
+palettes actually synchronized. `-WhatIf` makes no network requests or cache
+writes. No silent bundled fallback or stale-cache fallback is performed.
+
+These commands are introduced in this draft; they are **not present in the
+already published v1.1.0-public-api.1 prerelease**. The API popularity metadata
+also needs its separate reviewed deployment before live `-Popular` can work.
+The existing prerelease still supports:
+
+```powershell
+Get-WindowsTerminalTheme -Source PublicCatalog
+```
+
+If a command or `-Source` is missing, inspect the loaded module rather than
+resetting your checkout:
+
+```powershell
+Get-Command Get-WindowsTerminalTheme | Select-Object Name, Source, @{n='ModulePath';e={$_.Module.Path}}
+(Get-Command Get-WindowsTerminalTheme).Parameters.Keys
+Get-Module WTConfigurator | Select-Object Version, Path
+```
+
+Use a fresh PowerShell session and import the intended extracted package's
+absolute `WTConfigurator.psd1` path with `-Force`; use
+`WTConfigurator\Get-WindowsTerminalTheme` to avoid a same-named command from
+another module. No checkout overwrite, branch switch, execution-policy change
+or live settings edit is required.

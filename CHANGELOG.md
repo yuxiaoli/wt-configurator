@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add discoverable remote listing and explicit validated offline cache synchronization.
+- Add category-scoped Gogh popularity flags, provenance and client-side filtering.
+- Preserve unknown popularity and all settings/application safety boundaries.
+
 ## 1.1.0
 
 - Add explicit `PublicCatalog` source to theme commands and interactive selection.

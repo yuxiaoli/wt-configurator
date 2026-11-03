@@ -7,7 +7,7 @@
     Description = 'Windows Terminal bundled/public theme, opacity, acrylic, and backup configuration.'
     PowerShellVersion = '5.1'
     CompatiblePSEditions = @('Desktop', 'Core')
-    FunctionsToExport = @('Get-WindowsTerminalTheme', 'Get-WindowsTerminalProfile', 'Set-WindowsTerminalAppearance', 'Set-WindowsTerminalTheme', 'Restore-WindowsTerminalSettings')
+    FunctionsToExport = @('Get-WindowsTerminalRemoteTheme', 'Sync-WindowsTerminalTheme', 'Get-WindowsTerminalTheme', 'Get-WindowsTerminalProfile', 'Set-WindowsTerminalAppearance', 'Set-WindowsTerminalTheme', 'Restore-WindowsTerminalSettings')
     CmdletsToExport = @()
     VariablesToExport = @()
     AliasesToExport = @()
